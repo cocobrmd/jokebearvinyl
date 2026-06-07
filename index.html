@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Jokebear Vinyl Player</title>
+
+<style>
+body {
+  margin: 0;
+  background: #0b0b10;
+  overflow: hidden;
+  font-family: monospace;
+}
+
+#ui {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  right: 10px;
+  display: flex;
+  gap: 6px;
+  z-index: 10;
+}
+
+input, button {
+  padding: 10px;
+  border: none;
+  border-radius: 6px;
+}
+
+input { flex: 1; }
+
+button {
+  background: #ff4d6d;
+  color: white;
+  cursor: pointer;
+}
+
+canvas {
+  display: block;
+}
+</style>
+</head>
+
+<body>
+
+<div id="ui">
+  <button onclick="login()">Login Spotify</button>
+  <input id="playlist" placeholder="Paste Spotify playlist link..." />
+  <button onclick="play()">Play</button>
+</div>
+
+<canvas id="c"></canvas>
+
+<script src="https://sdk.scdn.co/spotify-player.js"></script>
+
+<script>
+/* =======================
+CONFIG
+======================= */
+const clientId = "YOUR_CLIENT_ID";
+const redirectUri = "https://YOUR_USERNAME.github.io/YOUR_REPO/";
+
+let token = null;
+let player;
+let deviceId;
+
+/* =======================
+CANVAS
+======================= */
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d");
+
+function resize(){
+  canvas.width = innerWidth;
+  canvas.height = innerHeight;
+}
+addEventListener("resize", resize);
+resize();
+
+/* =======================
+OAUTH LOGIN
+======================= */
+function login(){
+  const scopes = [
+    "streaming",
+    "user-read-playback-state",
+    "user-modify-playback-state"
+  ].join(" ");
+
+  window.location =
+  "https://accounts.spotify.com/authorize" +
+  "?response_type=token" +
+  "&client_id=" + clientId +
+  "&scope=" + encodeURIComponent(scopes) +
+  "&redirect_uri=" + encodeURIComponent(redirectUri);
+}
+
+/* extract token */
+function getToken(){
+  const hash = window.location.hash;
+  if (!hash) return null;
+  const params = new URLSearchParams(hash.replace("#",""));
+  return params.get("access_token");
+}
+
+token = getToken();
+
+/* =======================
+SPOTIFY PLAYER
+======================= */
+window.onSpotifyWebPlaybackSDKReady = () => {
+
+  if (!token) return;
+
+  player = new Spotify.Player({
+    name: "Jokebear Vinyl",
+    getOAuthToken: cb => cb(token),
+    volume: 0.8
+  });
+
+  player.addListener("ready", ({ device_id }) => {
+    deviceId = device_id;
+    console.log("Device ready:", deviceId);
+  });
+
+  player.connect();
+};
+
+/* =======================
+PLAY PLAYLIST
+======================= */
+function extractId(url){
+  return url.match(/playlist\/([a-zA-Z0-9]+)/)?.[1];
+}
+
+async function play(){
+  const url = document.getElementById("playlist").value;
+  const id = extractId(url);
+
+  if (!id) return alert("Invalid playlist link");
+
+  await fetch("https://api.spotify.com/v1/me/player", {
+    method: "PUT",
+    headers: {
+      "Authorization": "Bearer " + token,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      device_ids: [deviceId],
+      play: false
+    })
+  });
+
+  await fetch("https://api.spotify.com/v1/me/player/play", {
+    method: "PUT",
+    headers: {
+      "Authorization": "Bearer " + token,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      context_uri: "spotify:playlist:" + id
+    })
+  });
+}
+
+/* =======================
+FAKE BASS (Spotify doesn't expose raw audio)
+======================= */
+let bass = 0;
+
+setInterval(() => {
+  bass = Math.random(); // visual simulation
+}, 120);
+
+/* =======================
+ANIMATION
+======================= */
+let angle = 0;
+
+function loop(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  // background
+  ctx.fillStyle = "#fff";
+  for(let i=0;i<60;i++){
+    ctx.fillRect((i*97)%canvas.width, (i*53)%canvas.height, 2, 2);
+  }
+
+  const cx = canvas.width/2;
+  const cy = canvas.height/2;
+
+  // vinyl
+  angle += 0.03;
+
+  ctx.save();
+  ctx.translate(cx,cy);
+  ctx.rotate(angle);
+
+  ctx.fillStyle = "#111";
+  ctx.beginPath();
+  ctx.arc(0,0,80,0,Math.PI*2);
+  ctx.fill();
+
+  ctx.restore();
+
+  // Jokebear
+  const dancing = bass > 0.5;
+
+  ctx.fillStyle = dancing ? "#ffcc00" : "#8b5a2b";
+  ctx.fillRect(cx-200, cy+40, 60, 60);
+
+  // needle
+  ctx.strokeStyle = "#aaa";
+  ctx.beginPath();
+  ctx.moveTo(cx+120, cy-120);
+  ctx.lineTo(cx+20, cy);
+  ctx.stroke();
+
+  requestAnimationFrame(loop);
+}
+
+loop();
+</script>
+
+</body>
+</html>

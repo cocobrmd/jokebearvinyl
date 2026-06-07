@@ -1,0 +1,288 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Jokebear Vinyl Player</title>
+
+<style>
+body {
+  margin: 0;
+  background: #0b0b10;
+  overflow: hidden;
+  font-family: monospace;
+}
+
+#ui {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  right: 10px;
+  display: flex;
+  gap: 8px;
+  z-index: 10;
+}
+
+input, button {
+  padding: 10px;
+  border: none;
+  border-radius: 6px;
+}
+
+input { flex: 1; }
+
+button {
+  background: #ff4d6d;
+  color: white;
+  cursor: pointer;
+}
+
+canvas {
+  display: block;
+}
+</style>
+</head>
+
+<body>
+
+<div id="ui">
+  <button onclick="login()">Login Spotify</button>
+  <input id="playlist" placeholder="Paste Spotify playlist link" />
+  <button onclick="playPlaylist()">Play</button>
+</div>
+
+<canvas id="c"></canvas>
+
+<script src="https://sdk.scdn.co/spotify-player.js"></script>
+
+<script>
+/* =========================
+CONFIG
+========================= */
+const clientId = "b70b154cbfe744d2b0c35abdae214abe";
+const redirectUri = "https://cocobrmd.github.io/jokebearvinyl/";
+
+let token = null;
+let player;
+let deviceId;
+let ready = false;
+
+/* =========================
+CANVAS
+========================= */
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d");
+
+function resize(){
+  canvas.width = innerWidth;
+  canvas.height = innerHeight;
+}
+addEventListener("resize", resize);
+resize();
+
+/* =========================
+SPOTIFY LOGIN (PKCE)
+========================= */
+function login() {
+  const scopes = [
+    "streaming",
+    "user-read-playback-state",
+    "user-modify-playback-state"
+  ].join(" ");
+
+  const verifier = generateVerifier();
+  generateChallenge(verifier).then(challenge => {
+
+    localStorage.setItem("verifier", verifier);
+
+    const args =
+      "response_type=code" +
+      "&client_id=" + clientId +
+      "&scope=" + encodeURIComponent(scopes) +
+      "&redirect_uri=" + encodeURIComponent(redirectUri) +
+      "&code_challenge_method=S256" +
+      "&code_challenge=" + challenge;
+
+    window.location = "https://accounts.spotify.com/authorize?" + args;
+  });
+}
+
+/* PKCE helpers */
+function generateVerifier() {
+  const array = new Uint32Array(56);
+  crypto.getRandomValues(array);
+  return btoa(String.fromCharCode(...array))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
+async function generateChallenge(verifier) {
+  const data = new TextEncoder().encode(verifier);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return btoa(String.fromCharCode(...new Uint8Array(digest)))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
+/* =========================
+HANDLE REDIRECT → GET TOKEN
+========================= */
+async function handleRedirect() {
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get("code");
+
+  if (!code) return;
+
+  const verifier = localStorage.getItem("verifier");
+
+  const body = new URLSearchParams({
+    client_id: clientId,
+    grant_type: "authorization_code",
+    code: code,
+    redirect_uri: redirectUri,
+    code_verifier: verifier
+  });
+
+  const res = await fetch("https://accounts.spotify.com/api/token", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded"
+    },
+    body
+  });
+
+  const data = await res.json();
+  token = data.access_token;
+
+  window.history.replaceState({}, document.title, redirectUri);
+}
+
+handleRedirect();
+
+/* =========================
+SPOTIFY PLAYER
+========================= */
+window.onSpotifyWebPlaybackSDKReady = () => {
+  if (!token) return;
+
+  player = new Spotify.Player({
+    name: "Jokebear Vinyl Player",
+    getOAuthToken: cb => cb(token),
+    volume: 0.8
+  });
+
+  player.addListener("ready", ({ device_id }) => {
+    deviceId = device_id;
+    ready = true;
+    console.log("Device ready:", deviceId);
+  });
+
+  player.connect();
+};
+
+/* =========================
+PLAYLIST
+========================= */
+function extractId(url){
+  return url.match(/playlist\/([a-zA-Z0-9]+)/)?.[1];
+}
+
+async function playPlaylist(){
+  if (!token) return alert("Login first");
+  if (!ready) return alert("Player not ready yet");
+
+  const url = document.getElementById("playlist").value;
+  const id = extractId(url);
+
+  if (!id) return alert("Invalid playlist link");
+
+  await fetch("https://api.spotify.com/v1/me/player", {
+    method: "PUT",
+    headers: {
+      "Authorization": "Bearer " + token,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      device_ids: [deviceId],
+      play: false
+    })
+  });
+
+  await fetch("https://api.spotify.com/v1/me/player/play", {
+    method: "PUT",
+    headers: {
+      "Authorization": "Bearer " + token,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      context_uri: "spotify:playlist:" + id
+    })
+  });
+}
+
+/* =========================
+VISUALS (VINYL + JOKEBEAR)
+========================= */
+let angle = 0;
+let bass = 0;
+
+setInterval(() => {
+  bass = Math.random(); // Spotify doesn't expose raw audio
+}, 120);
+
+function loop(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  // stars
+  ctx.fillStyle = "#fff";
+  for(let i=0;i<70;i++){
+    ctx.fillRect((i*97)%canvas.width, (i*53)%canvas.height, 2, 2);
+  }
+
+  const cx = canvas.width/2;
+  const cy = canvas.height/2;
+
+  // vinyl
+  angle += 0.03 + bass * 0.02;
+
+  ctx.save();
+  ctx.translate(cx,cy);
+  ctx.rotate(angle);
+
+  ctx.fillStyle = "#111";
+  ctx.beginPath();
+  ctx.arc(0,0,80,0,Math.PI*2);
+  ctx.fill();
+
+  ctx.restore();
+
+  // needle
+  ctx.strokeStyle = "#aaa";
+  ctx.beginPath();
+  ctx.moveTo(cx+120, cy-120);
+  ctx.lineTo(cx+20, cy);
+  ctx.stroke();
+
+  // Jokebear
+  const dancing = bass > 0.5;
+
+  ctx.fillStyle = dancing ? "#ffd54a" : "#8b5a2b";
+  ctx.fillRect(cx-180, cy+60, 60, 60);
+
+  ctx.fillStyle = "#fff";
+  ctx.fillText(
+    ready ? "PLAYER READY" : "LOADING...",
+    20, 30
+  );
+
+  requestAnimationFrame(loop);
+}
+
+loop();
+</script>
+
+</body>
+</html>
